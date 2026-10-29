@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "node server/dev.mjs",
-    "test": "node --test tests/netlify.test.mjs",
+    "test": "node --test tests/netlify.test.mjs tests/netlify-function.test.mjs",
     "build": "node scripts/build-web.mjs",
     "test:browser": "node tests/netlify-browser.cjs",
     "check:functions": "node scripts/check-functions.mjs"

@@ -2,6 +2,7 @@ import {createHmac,randomBytes,randomUUID,timingSafeEqual,createCipheriv,createD
 import questions from './questions.mjs';
 import {createPdf} from './pdf.mjs';
 import {excelProfiles} from './excel.mjs';
+import {reportFailure} from './diagnostics.mjs';
 export const VERSION='netlify-1';
 const ADMIN='gsvnsdl2006@gmail.com';
 export class ApiError extends Error{constructor(message,status=400){super(message);this.status=status;}}
@@ -102,5 +103,5 @@ export function createService({store,secret,adminHash,secure=true}){
     const pdf=await createPdf(member,db.logos,document),filename=encodeURIComponent('Fiche de santé — '+member.name+'.pdf').replace(/[!'()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase());
     return new Response(pdf,{headers:{'Content-Type':'application/pdf','Content-Disposition':`attachment; filename="fiche-de-sante.pdf"; filename*=UTF-8''${filename}`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
    }
-   if(request.method!=='POST')fail('Méthode non autorisée.',405);const origin=request.headers.get('origin');if(origin!==new URL(request.url).origin)fail('Origine non autorisée.',403);if(!request.headers.get('content-type')?.startsWith('application/json'))fail('Format non autorisé.',415);const text=await request.text();if(Buffer.byteLength(text)>5.8*1024*1024)fail('Requête trop volumineuse.',413);let payload;try{payload=JSON.parse(text);}catch{fail('Requête non valide.');}const result=await call(request,payload,ip);if(result.cookie)headers['Set-Cookie']=result.cookie;return new Response(JSON.stringify({data:result.value}),{headers});}catch(error){const status=error instanceof ApiError?error.status:500;return new Response(JSON.stringify({error:status===500?'Erreur du serveur. Réessayez.':error.message}),{status,headers});}}};
+   if(request.method!=='POST')fail('Méthode non autorisée.',405);const origin=request.headers.get('origin');if(origin!==new URL(request.url).origin)fail('Origine non autorisée.',403);if(!request.headers.get('content-type')?.startsWith('application/json'))fail('Format non autorisé.',415);const text=await request.text();if(Buffer.byteLength(text)>5.8*1024*1024)fail('Requête trop volumineuse.',413);let payload;try{payload=JSON.parse(text);}catch{fail('Requête non valide.');}const result=await call(request,payload,ip);if(result.cookie)headers['Set-Cookie']=result.cookie;return new Response(JSON.stringify({data:result.value}),{headers});}catch(error){if(error instanceof ApiError)return new Response(JSON.stringify({error:error.message}),{status:error.status,headers});const failure=reportFailure(error,'api');return new Response(JSON.stringify({error:failure.message,reference:failure.reference}),{status:failure.status,headers});}}};
 }

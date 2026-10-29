@@ -5,7 +5,8 @@
     "dev": "node server/dev.mjs",
     "test": "node --test tests/netlify.test.mjs",
     "build": "node scripts/build-web.mjs",
-    "test:browser": "node tests/netlify-browser.cjs"
+    "test:browser": "node tests/netlify-browser.cjs",
+    "check:functions": "node scripts/check-functions.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -16,5 +17,8 @@
     "arabic-persian-reshaper": "1.0.1",
     "bidi-js": "1.1.0",
     "pdf-lib": "1.17.1"
+  },
+  "devDependencies": {
+    "@netlify/zip-it-and-ship-it": "16.6.0"
   }
 }

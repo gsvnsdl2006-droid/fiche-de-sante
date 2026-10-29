@@ -1,0 +1,9 @@
+.clasp.json
+node_modules/
+.env
+
+dist/
+.local/
+.netlify/
+private-data/
+*.log

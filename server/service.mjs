@@ -5,9 +5,9 @@ export const VERSION='netlify-1';
 const ADMIN='gsvnsdl2006@gmail.com';
 export class ApiError extends Error{constructor(message,status=400){super(message);this.status=status;}}
 const fail=(message,status=400)=>{throw new ApiError(message,status);};
-const norm=code=>String(code||'').replace(/[\s-]/g,'').toUpperCase();
+const norm=value=>{let code=String(value??'').trim().normalize('NFC');if(Array.from(code).length!==8){const compact=code.replace(/[\s-]/g,'');if(Array.from(compact).length===8)code=compact;}return code.replace(/[a-z]/g,c=>c.toUpperCase());};
 const stamp=()=>new Date().toISOString();
-function validCode(value){const code=norm(value);if(!/^[A-Z0-9]{8}$/.test(code)||/^(.)\1+$/.test(code)||['12345678','87654321','ABCDEFGH','PASSWORD','AZERTYUI','QWERTYUI'].includes(code))fail('Choisissez 8 lettres ou chiffres, sans suite évidente.');return code;}
+function validCode(value){const code=norm(value);if(Array.from(code).length!==8)fail('Le code doit contenir exactement 8 caractères.');return code;}
 function nameOf(value){const name=String(value||'').trim();if(!name||name.length>150)fail('Indiquez un nom complet (150 caractères maximum).');return name;}
 function unitOf(value){if(!['Meute','Troupe','Clan','À attribuer'].includes(value))fail('Unité non valide.');return value;}
 function label(value){return String(value||'').replace(/_x000a_/gi,' ').replace(/\s+2\s*$/,'').normalize('NFD').replace(/[\u0300-\u036f\u064b-\u065f\u0670]/g,'').replace(/[^a-zA-Z0-9\u0600-\u06ff]/g,'').toLowerCase();}
@@ -74,5 +74,19 @@ export function createService({store,secret,adminHash,secure=true}){
   if(method==='uploadLogo'){admin(user);if(!['scouts','group'].includes(args[0]))fail('Logo inconnu.');const data=await image(args[1],500*1024);return {value:await mutate(db=>{db.logos[args[0]]='data:'+data.mime+';base64,'+data.base64;return db.logos;})};}
   fail('Action non disponible.',404);
  }
- return {async handle(request,ip){const headers={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};try{if(request.method!=='POST')fail('Méthode non autorisée.',405);const origin=request.headers.get('origin');if(origin!==new URL(request.url).origin)fail('Origine non autorisée.',403);if(!request.headers.get('content-type')?.startsWith('application/json'))fail('Format non autorisé.',415);const text=await request.text();if(Buffer.byteLength(text)>5.8*1024*1024)fail('Requête trop volumineuse.',413);let payload;try{payload=JSON.parse(text);}catch{fail('Requête non valide.');}const result=await call(request,payload,ip);if(result.cookie)headers['Set-Cookie']=result.cookie;return new Response(JSON.stringify({data:result.value}),{headers});}catch(error){const status=error instanceof ApiError?error.status:500;return new Response(JSON.stringify({error:status===500?'Erreur du serveur. Réessayez.':error.message}),{status,headers});}}};
+ return {async handle(request,ip){const headers={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};try{
+   if(request.method==='GET'){
+    const url=new URL(request.url),match=url.pathname.match(/(?:^\/api|\/functions\/api)\/pdf\/([^/]+)$/);
+    if(!match)fail('Document introuvable.',404);
+    const user=await identity(request),db=await read(),member=publicMember(owner(user,decodeURIComponent(match[1]),db),db);
+    if(!member.originalAnswers.some(a=>a.answer.trim()))fail('Complétez votre fiche avant le téléchargement.');
+    let document=null;
+    if(url.searchParams.get('identity')==='1'){
+     if(!member.identityFile)fail('Ajoutez d’abord une pièce d’identité.');
+     document=(await store.get(member.identityFile.key))?.data;if(!document)fail('Pièce jointe introuvable.',404);
+    }
+    const pdf=await createPdf(member,db.logos,document),filename=encodeURIComponent('Fiche de santé — '+member.name+'.pdf').replace(/[!'()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase());
+    return new Response(pdf,{headers:{'Content-Type':'application/pdf','Content-Disposition':`attachment; filename="fiche-de-sante.pdf"; filename*=UTF-8''${filename}`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+   }
+   if(request.method!=='POST')fail('Méthode non autorisée.',405);const origin=request.headers.get('origin');if(origin!==new URL(request.url).origin)fail('Origine non autorisée.',403);if(!request.headers.get('content-type')?.startsWith('application/json'))fail('Format non autorisé.',415);const text=await request.text();if(Buffer.byteLength(text)>5.8*1024*1024)fail('Requête trop volumineuse.',413);let payload;try{payload=JSON.parse(text);}catch{fail('Requête non valide.');}const result=await call(request,payload,ip);if(result.cookie)headers['Set-Cookie']=result.cookie;return new Response(JSON.stringify({data:result.value}),{headers});}catch(error){const status=error instanceof ApiError?error.status:500;return new Response(JSON.stringify({error:status===500?'Erreur du serveur. Réessayez.':error.message}),{status,headers});}}};
 }

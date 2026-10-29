@@ -25,7 +25,7 @@ When Netlify is connected to GitHub, pushes to the configured production branch 
 
 ## Members and existing responses
 
-Members register with a name, requested unit and a chosen eight-character code, or use the random code suggestion. Registration always creates a new blank profile; it cannot claim another person's existing records by name. Members with a prepared profile should receive their existing code from the administrator instead.
+Members register with a name, requested unit and a chosen eight-character code, or use the random code suggestion. Repeated and sequential characters are allowed; there is no complexity requirement. Registration always creates a new blank profile; it cannot claim another person's existing records by name. Members with a prepared profile should receive their existing code from the administrator instead.
 
 After administrator sign-in, use **Importer les profils préparés** to import the private JSON created from the uploaded workbook. The import retains all 39 individual answers, activates the prepared codes and is idempotent for unchanged source questionnaires. Repeated names with different answers remain separate. The private codes CSV includes the Excel row and birth date to help the administrator review repeated names before distributing codes. Reimporting does not reset existing codes or overwrite app edits.
 
@@ -35,7 +35,7 @@ Official units remain **À attribuer** until the administrator chooses Meute, Tr
 
 All data APIs require a valid server session, apart from login, registration and public logo configuration. Sessions use random 256-bit tokens in HTTP-only, Secure, SameSite=Strict cookies and are kept server-side; credentials never go in URLs or local storage. Origin checks reject cross-site API requests. Login failures are throttled per client. Member ownership is checked before records and images are read or changed. No download uses an unprotected public storage URL.
 
-ID/passport images accept JPG/PNG up to 4 MiB. PDFs contain all relevant question answers and bilingual labels; an optional annex includes the identity image. The PDF server embeds a font for Arabic and French. Uploading replaces the previous stored identity image. Logos can be uploaded by the administrator and appear in the interface and PDF.
+ID/passport images accept JPG/PNG up to 4 MiB. PDFs download through an authenticated URL with attachment headers and a named file. Supported phones also offer a native Enregistrer / Partager action after preparing the PDF. Saving the profile prepares the PDF without forcing a browser preview. PDFs contain all relevant question answers and bilingual labels; an optional annex includes the identity image. The PDF server embeds a font for Arabic and French. Uploading replaces the previous stored identity image. Logos can be uploaded by the administrator and appear in the interface and PDF.
 
 **Google Drive synchronization is not connected in this Netlify version.** Current records and documents are stored privately on Netlify. Restoring automatic Drive backup requires a separate authorized Google connection; do not claim a Netlify deployment has connected Drive. The original uploaded Excel remains unchanged.
 

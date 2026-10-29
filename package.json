@@ -16,7 +16,8 @@
     "@pdf-lib/fontkit": "1.1.1",
     "arabic-persian-reshaper": "1.0.1",
     "bidi-js": "1.1.0",
-    "pdf-lib": "1.17.1"
+    "pdf-lib": "1.17.1",
+    "read-excel-file": "9.3.13"
   },
   "devDependencies": {
     "@netlify/zip-it-and-ship-it": "16.6.0"

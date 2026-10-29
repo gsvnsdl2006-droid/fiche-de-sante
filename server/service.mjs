@@ -1,6 +1,7 @@
-import {createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
+import {createHmac,randomBytes,randomUUID,timingSafeEqual,createCipheriv,createDecipheriv,hkdfSync} from 'node:crypto';
 import questions from './questions.mjs';
 import {createPdf} from './pdf.mjs';
+import {excelProfiles} from './excel.mjs';
 export const VERSION='netlify-1';
 const ADMIN='gsvnsdl2006@gmail.com';
 export class ApiError extends Error{constructor(message,status=400){super(message);this.status=status;}}
@@ -16,6 +17,10 @@ export function questionnaire(source=[]){const used=new Set();const fields=quest
 const initial=()=>({members:[],access:{},logos:{},rates:{}});
 export function createService({store,secret,adminHash,secure=true}){
  if(!secret||secret.length<32||!/^[a-f0-9]{64}$/i.test(adminHash||''))throw new Error('Server credentials are not configured.');
+ const codeKey=Buffer.from(hkdfSync('sha256',Buffer.from(secret),'boussole','member-code-vault-v1',32));
+ const seal=code=>{const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',codeKey,iv),encrypted=Buffer.concat([cipher.update(code,'utf8'),cipher.final()]);return [iv.toString('hex'),cipher.getAuthTag().toString('hex'),encrypted.toString('hex')].join('.');};
+ const unseal=value=>{try{const [iv,tag,data]=value.split('.');const decipher=createDecipheriv('aes-256-gcm',codeKey,Buffer.from(iv,'hex'));decipher.setAuthTag(Buffer.from(tag,'hex'));return Buffer.concat([decipher.update(Buffer.from(data,'hex')),decipher.final()]).toString('utf8');}catch{fail('Ce code doit être réinitialisé.',409);}};
+ const displayCode=code=>/^[A-Z0-9]{8}$/.test(code)?code.slice(0,4)+'-'+code.slice(4):code;
  const hash=value=>createHmac('sha256',secret).update(String(value)).digest('hex');
  const cookieName=secure?'__Host-boussole':'boussole_dev';
  const cookie=(token,age=7200)=>`${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
@@ -28,7 +33,7 @@ export function createService({store,secret,adminHash,secure=true}){
  async function session(user){const token=randomBytes(32).toString('hex');await store.set('session/'+hash(token),{...user,expires:Date.now()+7200000});return {value:{authenticated:true},cookie:cookie(token)};}
  function throttle(db,key,max,period,consume=true){const now=Date.now();for(const [k,list] of Object.entries(db.rates))if(!list.some(t=>now-t<86400000))delete db.rates[k];if(Object.keys(db.rates).length>2000)fail('Réessayez plus tard.',429);const attempts=(db.rates[key]||[]).filter(t=>now-t<period);if(attempts.length>=max)return new ApiError('Trop de tentatives. Réessayez plus tard.',429);if(consume)attempts.push(now);db.rates[key]=attempts;return null;}
  const fingerprint=answers=>hash('source:'+JSON.stringify(questionnaire(answers).map(a=>[a.id,String(a.answer||'').trim().replace(/\s+/g,' ')])));
- function setCode(db,m,raw){const code=validCode(raw),digest=hash('code:'+code);if(Object.entries(db.access).some(([id,a])=>id!==m.id&&a.hash===digest))fail('Ce code n’est pas disponible.');db.access[m.id]={hash:digest,version:randomUUID()};return code.slice(0,4)+'-'+code.slice(4);}
+ function setCode(db,m,raw){const code=validCode(raw),digest=hash('code:'+code);if(Object.entries(db.access).some(([id,a])=>id!==m.id&&a.hash===digest))fail('Ce code n’est pas disponible.');db.access[m.id]={hash:digest,version:randomUUID(),encrypted:seal(code)};return displayCode(code);}
  function freshCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from(randomBytes(8),b=>chars[b%32]).join('');}
  function newMember(input){return {id:randomUUID(),name:nameOf(input.name),email:String(input.email||'').trim().slice(0,200),unit:unitOf(input.unit||'À attribuer'),updatedAt:randomUUID(),originalAnswers:questionnaire()};}
  async function image(input,max=4*1024*1024){if(!input||!['image/png','image/jpeg'].includes(input.mime)||typeof input.base64!=='string'||input.base64.length>Math.ceil(max/3)*4+4||!/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64))fail('Image JPG ou PNG, 4 Mo maximum.');const bytes=Buffer.from(input.base64,'base64');if(!bytes.length||bytes.length>max||!(input.mime==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):bytes[0]===255&&bytes[1]===216&&bytes[2]===255))fail('Image non valide.');return {mime:input.mime,base64:input.base64};}
@@ -39,7 +44,7 @@ export function createService({store,secret,adminHash,secure=true}){
   if(method==='getPublicConfig'){const db=await read();return {value:{version:VERSION,logos:db.logos,registrationReady:true}};}
   if(method==='loginMember'){
    const code=norm(args[0]);if(code.length>32)fail('Code incorrect.');
-   const result=await mutate(db=>{const blocked=throttle(db,'login:'+rateKey,10,600000,false);if(blocked)return {error:blocked};const digest=hash('code:'+code),id=Object.keys(db.access).find(id=>db.access[id].hash===digest);if(!id||!db.members.some(m=>m.id===id)){throttle(db,'login:'+rateKey,10,600000);return {error:new ApiError('Code incorrect.',401)};}return {id,version:db.access[id].version,admin:false};});return session(result);
+   const result=await mutate(db=>{const blocked=throttle(db,'login:'+rateKey,10,600000,false);if(blocked)return {error:blocked};const digest=hash('code:'+code),id=Object.keys(db.access).find(id=>db.access[id].hash===digest);if(!id||!db.members.some(m=>m.id===id)){throttle(db,'login:'+rateKey,10,600000);return {error:new ApiError('Code incorrect.',401)};}if(!db.access[id].encrypted)db.access[id].encrypted=seal(code);return {id,version:db.access[id].version,admin:false};});return session(result);
   }
   if(method==='loginAdministrator'){
    const result=await mutate(db=>{const blocked=throttle(db,'admin:'+rateKey,5,900000,false);if(blocked)return {error:blocked};const received=hash('admin:'+String(args[0]||'').replace(/[\s-]/g,'').toUpperCase());if(!timingSafeEqual(Buffer.from(received,'hex'),Buffer.from(adminHash,'hex'))){throttle(db,'admin:'+rateKey,5,900000);return {error:new ApiError('Code responsable incorrect.',401)};}return {admin:true,email:ADMIN,version:adminHash};});return session(result);
@@ -51,13 +56,14 @@ export function createService({store,secret,adminHash,secure=true}){
   if(method==='logoutMember'){await store.remove('session/'+hash(user.token));return {value:true,cookie:cookie('',0)};}
   if(method==='getState'){const db=await read();return {value:{user:{admin:user.admin,email:user.admin?ADMIN:undefined,id:user.id},importMode:'prepared',members:db.members.filter(m=>user.admin||m.id===user.id).map(m=>publicMember(m,db)),questions:questions.map(q=>q.question),logos:db.logos}};}
   if(method==='createMember'){admin(user);const result=await mutate(db=>{const m=newMember(args[0]||{}),code=setCode(db,m,freshCode());db.members.push(m);return {members:db.members.map(m=>publicMember(m,db)),member:publicMember(m,db),code};});return {value:result};}
+  if(method==='getMemberCode'){admin(user);const db=await read(),m=owner(user,args[0],db),access=db.access[m.id];if(!access?.encrypted)fail('Ancien code non récupérable. Le membre doit se reconnecter une fois, ou vous pouvez réinitialiser son code.',409);return {value:{id:m.id,name:m.name,code:displayCode(unseal(access.encrypted))}};}
   if(method==='resetMemberCode'){admin(user);return {value:await mutate(db=>{const m=owner(user,args[0],db);return {id:m.id,name:m.name,code:setCode(db,m,args[1]||freshCode())};})};}
   if(method==='updateMemberUnit'){admin(user);return {value:await mutate(db=>{const m=owner(user,args[0],db);m.unit=unitOf(args[1]);m.updatedAt=randomUUID();return publicMember(m,db);})};}
-  if(method==='importPreparedProfiles'){
-   admin(user);const input=args[0];if(input?.format!=='boussole-members-v1'||!Array.isArray(input.members)||!input.members.length||input.members.length>1000)fail('Fichier de profils non valide.');
+  if(method==='importPreparedProfiles'||method==='importExcelProfiles'){
+   admin(user);let input=args[0];if(method==='importExcelProfiles'){try{input=await excelProfiles(input,{questionnaire,generateCode:freshCode});}catch(e){fail(e.message);}}if(input?.format!=='boussole-members-v1'||!Array.isArray(input.members)||!input.members.length||input.members.length>1000)fail('Fichier de profils non valide.');
    const prepared=input.members.map(row=>{if(!Array.isArray(row.originalAnswers)||row.originalAnswers.length!==39||questions.some(q=>!row.originalAnswers.some(a=>a.id===q.id)))fail('Les 39 questions sont requises.');const answers=questions.map(q=>({...q,answer:String(row.originalAnswers.find(a=>a.id===q.id).answer||'').slice(0,10000)}));return {name:nameOf(row.name),sourceRow:Number.isInteger(row.sourceRow)?row.sourceRow:null,originalAnswers:answers,initialCode:validCode(row.initialCode),fingerprint:fingerprint(answers)};});
    if(new Set(prepared.map(r=>r.initialCode)).size!==prepared.length)fail('Deux codes du fichier sont identiques.');
-   return {value:await mutate(db=>{let created=0,activated=0;for(const row of prepared){let m=db.members.find(m=>m.sourceFingerprint===row.fingerprint);if(!m){m=newMember({name:row.name,unit:'À attribuer'});Object.assign(m,{sourceFingerprint:row.fingerprint,sourceRow:row.sourceRow,originalAnswers:row.originalAnswers,requestedUnit:row.originalAnswers[0].answer});db.members.push(m);created++;}if(!db.access[m.id]){setCode(db,m,row.initialCode);activated++;}}return {members:db.members.map(m=>publicMember(m,db)),created,activated,total:db.members.length};})};
+   return {value:await mutate(db=>{let created=0,activated=0;for(const row of prepared){let m=db.members.find(m=>m.sourceFingerprint===row.fingerprint);if(!m){m=newMember({name:row.name,unit:'À attribuer'});Object.assign(m,{sourceFingerprint:row.fingerprint,sourceRow:row.sourceRow,originalAnswers:row.originalAnswers,requestedUnit:row.originalAnswers[0].answer});db.members.push(m);created++;}if(!db.access[m.id]){setCode(db,m,row.initialCode);activated++;}else if(!db.access[m.id].encrypted&&db.access[m.id].hash===hash('code:'+row.initialCode)){db.access[m.id].encrypted=seal(row.initialCode);}}return {members:db.members.map(m=>publicMember(m,db)),created,activated,total:db.members.length};})};
   }
   if(method==='saveProfile'){
    const input=args[0]||{};const member=await mutate(db=>{const m=owner(user,input.id,db),fields=questionnaire(m.originalAnswers);if(m.updatedAt!==input.updatedAt)fail('Cette fiche a changé. Rechargez-la avant de modifier.',409);if(!Array.isArray(input.originalAnswers)||input.originalAnswers.length!==fields.length)fail('Questionnaire incomplet.');m.originalAnswers=fields.map((q,i)=>({...q,answer:String(input.originalAnswers[i]?.answer||'').slice(0,10000)}));const name=['firstName','lastName'].map(id=>m.originalAnswers.find(q=>q.id===id)?.answer||'').filter(Boolean).join(' ');if(name)m.name=name.slice(0,150);m.updatedAt=randomUUID();m.savedAt=stamp();return publicMember(m,db);});
@@ -76,7 +82,15 @@ export function createService({store,secret,adminHash,secure=true}){
  }
  return {async handle(request,ip){const headers={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};try{
    if(request.method==='GET'){
-    const url=new URL(request.url),match=url.pathname.match(/(?:^\/api|\/functions\/api)\/pdf\/([^/]+)$/);
+    const url=new URL(request.url);
+    if(/(?:^\/api|\/functions\/api)\/codes$/.test(url.pathname)){
+     const user=await identity(request);admin(user);const db=await read();
+     const csvCell=value=>{let s=String(value??'');if(/^[=+\-@\t\r]/.test(s))s='\t'+s;return '"'+s.replace(/"/g,'""')+'"';};
+     const rows=[['Membre','Unité','Ligne Excel','Code privé']];for(const m of db.members){const access=db.access[m.id];rows.push([m.name,m.unit,m.sourceRow||'',access?.encrypted?displayCode(unseal(access.encrypted)):'Ancien code : connexion ou réinitialisation requise']);}
+     const csv='\ufeff'+rows.map(row=>row.map(csvCell).join(';')).join('\r\n');
+     return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="codes-membres.csv"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+    }
+    const match=url.pathname.match(/(?:^\/api|\/functions\/api)\/pdf\/([^/]+)$/);
     if(!match)fail('Document introuvable.',404);
     const user=await identity(request),db=await read(),member=publicMember(owner(user,decodeURIComponent(match[1]),db),db);
     if(!member.originalAnswers.some(a=>a.answer.trim()))fail('Complétez votre fiche avant le téléchargement.');

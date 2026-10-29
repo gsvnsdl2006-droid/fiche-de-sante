@@ -4,7 +4,7 @@ Private member health profiles for Groupe Saint Vincent de Paul, Naccache. Frenc
 
 ## Hosting
 
-This version runs on **Netlify + GitHub**. It does not use Google Apps Script. The public website is built into `dist/`; only that directory is published. Netlify Functions handle authentication, authorization and document generation. Member records, credential hashes, sessions and attachments use a private site-scoped Netlify Blobs store. Git deployments do not erase that store.
+This version runs on **Netlify + GitHub**. It does not use Google Apps Script. The public website is built into `dist/`; only that directory is published. Netlify Functions handle authentication, authorization and document generation. Member records, credential hashes, encrypted code copies, sessions and attachments use a private site-scoped Netlify Blobs store. Git deployments do not erase that store.
 
 The 39 questions are defined in `server/questions.mjs`. No actual member answers, initial member codes or production credentials are included in this repository or the public build. Prepared Excel import files and the administrator access document are supplied privately outside the repository.
 
@@ -27,9 +27,9 @@ When Netlify is connected to GitHub, pushes to the configured production branch 
 
 Members register with a name, requested unit and a chosen eight-character code, or use the random code suggestion. Repeated and sequential characters are allowed; there is no complexity requirement. Registration always creates a new blank profile; it cannot claim another person's existing records by name. Members with a prepared profile should receive their existing code from the administrator instead.
 
-After administrator sign-in, use **Importer les profils préparés** to import the private JSON created from the uploaded workbook. The import retains all 39 individual answers, activates the prepared codes and is idempotent for unchanged source questionnaires. Repeated names with different answers remain separate. The private codes CSV includes the Excel row and birth date to help the administrator review repeated names before distributing codes. Reimporting does not reset existing codes or overwrite app edits.
+After administrator sign-in, use **Importer Excel / JSON** to select the original responses `.xlsx` workbook directly, or the private prepared JSON. No chat artifact download is needed when using the original Excel file. The parser preserves dates, numeric cell values, bilingual labels and all 39 responses. The import retains all 39 individual answers, activates the prepared codes and is idempotent for unchanged source questionnaires. Repeated names with different answers remain separate. The private codes CSV includes the Excel row and birth date to help the administrator review repeated names before distributing codes. Reimporting does not reset existing codes or overwrite app edits.
 
-Official units remain **À attribuer** until the administrator chooses Meute, Troupe or Clan. The original declared unit stays visible. The administrator can create members, reset codes, view and edit every profile, and download each document. A code reset revokes the old code and existing member sessions immediately. Forgotten codes are reset rather than recovered.
+Official units remain **À attribuer** until the administrator chooses Meute, Troupe or Clan. The original declared unit stays visible. The administrator can create members, reset codes, view and edit every profile, and download each document. A code reset revokes the old code and existing member sessions immediately. The administrator can use **Voir le code** in a member profile or **Télécharger les codes** for a protected CSV export. New/imported/reset codes have an AES-256-GCM encrypted copy, using a domain-separated HKDF key derived from the server secret, in addition to the HMAC authentication hash. Ciphertext is never returned with ordinary profile state. Earlier hash-only codes become viewable after a successful member login, or can be reset; they cannot be reversed from their hashes.
 
 ## Privacy and files
 
